@@ -27,10 +27,9 @@ with st.form("upload_form"):
     data_file = st.file_uploader("📊 Upload Main Data CSV", type="csv", key="data")
     submitted = st.form_submit_button("Load Files")
 
-# --- After Upload ---
+# --- Save uploaded files + store in session_state ---
 if submitted:
     if data_dict_file is not None and data_file is not None:
-        # Save uploaded files to 'files/' folder
         dict_path = os.path.join("files", "data_dictionary.csv")
         data_path = os.path.join("files", "your_data.csv")
 
@@ -40,34 +39,35 @@ if submitted:
         with open(data_path, "wb") as f:
             f.write(data_file.read())
 
-        # Load CSV files
         try:
-            dict_df = pd.read_csv(dict_path)
-            df = pd.read_csv(data_path)
+            st.session_state["df"] = pd.read_csv(data_path)
+            st.session_state["dict_df"] = pd.read_csv(dict_path)
+            st.success("✅ Files uploaded and saved successfully!")
         except Exception as e:
-            st.error(f"❌ Error loading CSV files: {str(e)}")
-            st.stop()
+            st.error(f"❌ Error reading CSV: {e}")
+    else:
+        st.warning("📌 Please upload both files before submitting.")
 
-        st.success("✅ Files uploaded and saved successfully!")
+# --- If data is available ---
+if "df" in st.session_state and "dict_df" in st.session_state:
+    df = st.session_state["df"]
+    dict_df = st.session_state["dict_df"]
 
-        # --- Show Data Dictionary ---
-        st.subheader("📘 Data Dictionary")
-        st.dataframe(dict_df)
+    st.subheader("📘 Data Dictionary")
+    st.dataframe(dict_df)
 
-        # --- Show Sample of Main Data ---
-        st.subheader("📊 Preview of Main Data")
-        st.dataframe(df.head(20))
+    st.subheader("📊 Preview of Main Data")
+    st.dataframe(df.head(20))
 
-        # --- Chat Section ---
-        st.subheader("🧠 Ask Anything About the Data")
-        user_query = st.text_area("Type your question here")
+    st.subheader("🧠 Ask Anything About the Data")
+    user_query = st.text_area("Type your question here")
 
-        if st.button("Ask"):
-            if user_query:
-                sample_data = df.head(5).to_csv(index=False)
-                dict_text = dict_df.to_csv(index=False)
+    if st.button("Ask"):
+        if user_query:
+            sample_data = df.head(5).to_csv(index=False)
+            dict_text = dict_df.to_csv(index=False)
 
-                prompt = f"""
+            prompt = f"""
 You are a data assistant helping to analyze CSV data using pandas.
 
 Here is a sample of the CSV:
@@ -80,12 +80,10 @@ Now answer the following question using Python pandas code:
 {user_query}
 """
 
-                try:
-                    response = model.generate_content(prompt)
-                    st.code(response.text, language="python")
-                except Exception as e:
-                    st.error(f"❌ Gemini Error: {str(e)}")
-            else:
-                st.warning("Please enter a question.")
-    else:
-        st.warning("📌 Please upload both Data Dictionary and Main Data files before proceeding.")
+            try:
+                response = model.generate_content(prompt)
+                st.code(response.text, language="python")
+            except Exception as e:
+                st.error(f"❌ Gemini Error: {str(e)}")
+        else:
+            st.warning("Please enter a question.")
