@@ -68,21 +68,45 @@ if user_input := st.chat_input("Type your message here..."):
     if model:
         try:
             if st.session_state.uploaded_data is not None and analyze_data_checkbox:
-                if "analyze" in user_input.lower() or "insight" in user_input.lower():
-                    data_description = st.session_state.uploaded_data.describe().to_string()
-                    prompt = f"""Analyze the following dataset and provide insights.
+                df_name = "df"
+                example_record = st.session_state.uploaded_data.head(2).to_string()
+                question = user_input
+                data_dict_text = st.session_state.data_dict_text
 
-Data Dictionary:
-{st.session_state.data_dict_text}
+                prompt = f"""
+You are a helpful Python code generator.
+Your goal is to write Python code snippets based on the user's question
+and the provided DataFrame information.
 
-Data Summary:
-{data_description}
+Here's the context:
+
+**User Question:**
+{question}
+
+**DataFrame Name:**
+{df_name}
+
+**DataFrame Details:**
+{data_dict_text}
+
+**Sample Data (Top 2 Rows):**
+{example_record}
+
+**Instructions:**
+1. Write Python code that addresses the user's question by querying or manipulating the DataFrame.
+2. **Crucially, use the `exec()` function to execute the generated code.**
+3. Do not import pandas
+4. Change date column type to datetime
+5. **Store the result of the executed code in a variable named `ANSWER`.**
+   This variable should hold the answer to the user's question (e.g., a filtered DataFrame, a calculated value, etc.).
+6. Assume the DataFrame is already loaded into a pandas DataFrame object named `{df_name}`. Do not include code to load the DataFrame.
+7. Keep the generated code concise and focused on answering the question.
+8. If the question requires a specific output format (e.g., a list, a single value), ensure the `query_result` variable holds that format.
 """
-                    response = model.generate_content(prompt)
-                    bot_response = response.text
-                else:
-                    response = model.generate_content(user_input)
-                    bot_response = response.text
+
+                response = model.generate_content(prompt)
+                bot_response = response.text
+
             elif not analyze_data_checkbox:
                 bot_response = "Data analysis is disabled. Please select the 'Analyze CSV Data with AI' checkbox to enable analysis."
             else:
