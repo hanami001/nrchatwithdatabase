@@ -19,38 +19,43 @@ except Exception as e:
 # --- Ensure 'files/' folder exists ---
 os.makedirs("files", exist_ok=True)
 
-# --- Upload Form ---
-st.subheader("📂 Upload Your Files")
+# --- Upload Section ---
+st.subheader("📂 Upload Your CSV Files")
 
 with st.form("upload_form"):
-    data_dict_file = st.file_uploader("Upload Data Dictionary CSV", type="csv", key="dict")
-    data_file = st.file_uploader("Upload Main Data CSV", type="csv", key="data")
+    data_dict_file = st.file_uploader("📘 Upload Data Dictionary CSV", type="csv", key="dict")
+    data_file = st.file_uploader("📊 Upload Main Data CSV", type="csv", key="data")
     submitted = st.form_submit_button("Load Files")
 
+# --- After Upload ---
 if submitted:
     if data_dict_file is not None and data_file is not None:
-        # Save uploaded files to /files folder
-        data_dict_path = os.path.join("files", "data_dictionary.csv")
-        data_file_path = os.path.join("files", "your_data.csv")
+        # Save uploaded files to 'files/' folder
+        dict_path = os.path.join("files", "data_dictionary.csv")
+        data_path = os.path.join("files", "your_data.csv")
 
-        with open(data_dict_path, "wb") as f:
+        with open(dict_path, "wb") as f:
             f.write(data_dict_file.read())
 
-        with open(data_file_path, "wb") as f:
+        with open(data_path, "wb") as f:
             f.write(data_file.read())
 
-        # Load data from saved files
-        dict_df = pd.read_csv(data_dict_path)
-        df = pd.read_csv(data_file_path)
+        # Load CSV files
+        try:
+            dict_df = pd.read_csv(dict_path)
+            df = pd.read_csv(data_path)
+        except Exception as e:
+            st.error(f"❌ Error loading CSV files: {str(e)}")
+            st.stop()
 
-        st.success("✅ Files uploaded and saved to /files!")
+        st.success("✅ Files uploaded and saved successfully!")
 
         # --- Show Data Dictionary ---
         st.subheader("📘 Data Dictionary")
         st.dataframe(dict_df)
 
-        # --- Show Main Data ---
-        st.subheader("📊 Main CSV Data")
+        # --- Show Sample of Main Data ---
+        st.subheader("📊 Preview of Main Data")
         st.dataframe(df.head(20))
 
         # --- Chat Section ---
@@ -83,4 +88,4 @@ Now answer the following question using Python pandas code:
             else:
                 st.warning("Please enter a question.")
     else:
-        st.warning("📌 Please upload both files before submitting.")
+        st.warning("📌 Please upload both Data Dictionary and Main Data files before proceeding.")
