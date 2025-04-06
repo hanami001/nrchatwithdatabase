@@ -29,6 +29,8 @@ if "dictionary_data" not in st.session_state:
     st.session_state.dictionary_data = None
 if "column_descriptions" not in st.session_state:
     st.session_state.column_descriptions = {}
+if "dictionary_formatted_text" not in st.session_state:
+    st.session_state.dictionary_formatted_text = ""
 
 # Display chat history
 for role, message in st.session_state.chat_history:
@@ -54,24 +56,125 @@ with col1:
 # Function to process the data dictionary into a usable format
 def process_data_dictionary(dict_data):
     column_descriptions = {}
+    formatted_text = ""
     
-    # Try to identify field name and description columns
-    field_cols = [col for col in dict_data.columns if any(term in col.lower() for term in ['field', 'column', 'variable', 'name'])]
-    desc_cols = [col for col in dict_data.columns if any(term in col.lower() for term in ['desc', 'definition', 'meaning', 'explanation', 'info'])]
+    # First, print the actual column names from the dictionary file for debugging
+    actual_columns = dict_data.columns.tolist()
+    print(f"Actual dictionary columns: {actual_columns}")
     
-    # If we found at least one field column and one description column
-    if field_cols and desc_cols:
-        field_col = field_cols[0]
-        desc_col = desc_cols[0]
-        
-        # Create a dictionary mapping field names to descriptions
+    # Try to intelligently identify which columns contain what information
+    # based on column names and content patterns
+    
+    # Identify column name column
+    name_cols = [col for col in actual_columns if any(term in col.lower() for term in 
+                ['field', 'column', 'variable', 'name', 'attribute', 'feature'])]
+    
+    # Identify data type column
+    type_cols = [col for col in actual_columns if any(term in col.lower() for term in 
+                ['type', 'datatype', 'data_type', 'format', 'dtype'])]
+    
+    # Identify description column
+    desc_cols = [col for col in actual_columns if any(term in col.lower() for term in 
+                ['desc', 'definition', 'meaning', 'explanation', 'info', 'comment', 'documentation'])]
+    
+    # If common naming patterns weren't found, try to identify columns by content analysis
+    if not name_cols and len(actual_columns) >= 1:
+        # Check first few rows to see if any column looks like it contains field names
+        # Field names typically have no spaces and follow naming conventions
+        for col in actual_columns:
+            sample_values = dict_data[col].head(5).astype(str)
+            # Check if values look like field names (no spaces, consistent format)
+            if all(not ' ' in val for val in sample_values if not pd.isna(val)):
+                name_cols.append(col)
+                break
+    
+    if not type_cols and len(actual_columns) >= 2:
+        # Data types are usually short strings like "int", "varchar", "text", etc.
+        for col in actual_columns:
+            if col in name_cols:
+                continue
+            sample_values = dict_data[col].head(5).astype(str)
+            # Check if values look like data types (short, consistent format)
+            if all(len(val) < 20 for val in sample_values if not pd.isna(val)):
+                type_cols.append(col)
+                break
+    
+    if not desc_cols and len(actual_columns) >= 3:
+        # Descriptions are usually longer text
+        for col in actual_columns:
+            if col in name_cols or col in type_cols:
+                continue
+            sample_values = dict_data[col].head(5).astype(str)
+            # Check if values look like descriptions (longer text)
+            if any(len(val) > 20 for val in sample_values if not pd.isna(val)):
+                desc_cols.append(col)
+                break
+    
+    # Default to positional fallbacks if we still couldn't identify columns
+    if not name_cols and len(actual_columns) >= 1:
+        name_cols = [actual_columns[0]]
+    
+    if not type_cols and len(actual_columns) >= 2:
+        type_cols = [actual_columns[1]]
+    
+    if not desc_cols and len(actual_columns) >= 3:
+        desc_cols = [actual_columns[2]]
+    
+    # Print what we identified for debugging
+    print(f"Identified name column: {name_cols[0] if name_cols else 'None'}")
+    print(f"Identified type column: {type_cols[0] if type_cols else 'None'}")
+    print(f"Identified description column: {desc_cols[0] if desc_cols else 'None'}")
+    
+    # Use the identified columns
+    name_col = name_cols[0] if name_cols else None
+    type_col = type_cols[0] if type_cols else None
+    desc_col = desc_cols[0] if desc_cols else None
+    
+    # Create a dictionary mapping field names to descriptions
+    if name_col:
         for _, row in dict_data.iterrows():
-            field_name = str(row[field_col]).strip()
-            description = str(row[desc_col]).strip()
-            if field_name and description:
-                column_descriptions[field_name] = description
+            field_name = str(row[name_col]).strip()
+            
+            # Skip empty field names
+            if not field_name or pd.isna(field_name):
+                continue
+            
+            # Get data type (if available)
+            data_type = ""
+            if type_col:
+                data_type = str(row[type_col]).strip() if not pd.isna(row[type_col]) else ""
+            
+            # Get description
+            description = ""
+            if desc_col:
+                description = str(row[desc_col]).strip() if not pd.isna(row[desc_col]) else ""
+            
+            # Store in dictionary
+            column_descriptions[field_name] = {
+                'data_type': data_type,
+                'description': description
+            }
     
-    return column_descriptions
+    # Create formatted text as requested
+    formatted_lines = []
+    for field_name, details in column_descriptions.items():
+        data_type = details['data_type']
+        description = details['description']
+        
+        line = f"- {field_name}"
+        if data_type:
+            line += f": {data_type}"
+        if description:
+            if data_type:
+                line += f". {description}"
+            else:
+                line += f": {description}"
+        
+        formatted_lines.append(line)
+    
+    formatted_text = '\n'.join(formatted_lines)
+    
+    return column_descriptions, formatted_text
 
 # Upload Data Dictionary
 with col2:
@@ -86,7 +189,7 @@ with col2:
             st.dataframe(dict_data.head())
             
             # Process dictionary into a more usable format
-            st.session_state.column_descriptions = process_data_dictionary(dict_data)
+            st.session_state.column_descriptions, st.session_state.dictionary_formatted_text = process_data_dictionary(dict_data)
         except Exception as e:
             st.error(f"An error occurred while reading the dictionary file: {e}")
 def process_data_dictionary(dict_data):
@@ -298,24 +401,65 @@ if user_input := st.chat_input("Type your message here..."):
                     st.session_state.dictionary_data
                 )
                 
-                # Prepare data context with ALL columns and their types
-                transaction_info = "Transaction Data Information:\n"
-                transaction_info += f"- Total Records: {len(st.session_state.transaction_data)}\n"
-                transaction_info += f"- Date Range: {detailed_analysis.get('date_min', 'N/A')} to {detailed_analysis.get('date_max', 'N/A')}\n\n"
+                # Get column mappings between transaction data and dictionary
+                transaction_columns = set(st.session_state.transaction_data.columns.tolist())
+                dictionary_columns = set(st.session_state.column_descriptions.keys())
                 
-                # Add column information with their types
-                transaction_info += "Column Information:\n"
+                # Find exact matches
+                exact_matches = transaction_columns.intersection(dictionary_columns)
+                
+                # Find potential fuzzy matches for remaining columns
+                unmatched_transaction_cols = transaction_columns - exact_matches
+                unmatched_dictionary_cols = dictionary_columns - exact_matches
+                
+                fuzzy_matches = {}
+                for t_col in unmatched_transaction_cols:
+                    # Try simple normalization (lowercase, remove spaces, underscores)
+                    normalized_t_col = t_col.lower().replace(' ', '').replace('_', '')
+                    
+                    for d_col in unmatched_dictionary_cols:
+                        normalized_d_col = d_col.lower().replace(' ', '').replace('_', '')
+                        
+                        # Check for containment in either direction
+                        if normalized_t_col in normalized_d_col or normalized_d_col in normalized_t_col:
+                            fuzzy_matches[t_col] = d_col
+                            break
+                
+                # Prepare transaction data column info with dictionary linkage
+                transaction_info = "Transaction Data Information:\n"
+                transaction_info += f"- Total Records: {len(st.session_state.transaction_data)}\n\n"
+                
+                # Add column information with mappings to dictionary
+                transaction_info += "Column Information (with dictionary mappings):\n"
                 for col in st.session_state.transaction_data.columns:
                     col_type = str(st.session_state.transaction_data[col].dtype)
-                    # Add description from dictionary if available
-                    col_description = st.session_state.column_descriptions.get(col, "No description available")
-                    transaction_info += f"- {col} (Type: {col_type}): {col_description}\n"
+                    
+                    # Check for dictionary mapping (exact or fuzzy)
+                    dict_col = None
+                    mapping_type = ""
+                    
+                    if col in exact_matches:
+                        dict_col = col
+                        mapping_type = "(exact match)"
+                    elif col in fuzzy_matches:
+                        dict_col = fuzzy_matches[col]
+                        mapping_type = "(fuzzy match)"
+                    
+                    if dict_col:
+                        col_info = st.session_state.column_descriptions.get(dict_col, {})
+                        col_description = col_info.get('description', "No description available") if isinstance(col_info, dict) else "No description available"
+                        col_data_type = col_info.get('data_type', "") if isinstance(col_info, dict) else ""
+                        
+                        # Use the dictionary data type if available, otherwise use the pandas dtype
+                        display_type = col_data_type if col_data_type else col_type
+                        transaction_info += f"- {col} {mapping_type} (Type: {display_type}): {col_description}\n"
+                    else:
+                        transaction_info += f"- {col} (Type: {col_type}): No dictionary mapping available\n"
                 
-                # Add dictionary context in a structured way
+                # Add dictionary context using the formatted text
                 dictionary_info = "Data Dictionary Information:\n"
-                if st.session_state.dictionary_data is not None:
-                    for col_name, description in st.session_state.column_descriptions.items():
-                        dictionary_info += f"- {col_name}: {description}\n"
+                if st.session_state.dictionary_formatted_text:
+                    dictionary_info += st.session_state.dictionary_formatted_text
                 else:
                     dictionary_info += "No data dictionary provided.\n"
                 
