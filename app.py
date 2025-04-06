@@ -27,6 +27,8 @@ if "transaction_data" not in st.session_state:
     st.session_state.transaction_data = None
 if "dictionary_data" not in st.session_state:
     st.session_state.dictionary_data = None
+if "column_descriptions" not in st.session_state:
+    st.session_state.column_descriptions = {}
 
 # Display chat history
 for role, message in st.session_state.chat_history:
@@ -60,8 +62,33 @@ with col2:
             st.success("Data dictionary successfully uploaded and read.")
             st.write("### Data Dictionary Preview")
             st.dataframe(dict_data.head())
+            
+            # Process dictionary into a more usable format
+            st.session_state.column_descriptions = process_data_dictionary(dict_data)
         except Exception as e:
             st.error(f"An error occurred while reading the dictionary file: {e}")
+
+# Function to process the data dictionary into a usable format
+def process_data_dictionary(dict_data):
+    column_descriptions = {}
+    
+    # Try to identify field name and description columns
+    field_cols = [col for col in dict_data.columns if any(term in col.lower() for term in ['field', 'column', 'variable', 'name'])]
+    desc_cols = [col for col in dict_data.columns if any(term in col.lower() for term in ['desc', 'definition', 'meaning', 'explanation', 'info'])]
+    
+    # If we found at least one field column and one description column
+    if field_cols and desc_cols:
+        field_col = field_cols[0]
+        desc_col = desc_cols[0]
+        
+        # Create a dictionary mapping field names to descriptions
+        for _, row in dict_data.iterrows():
+            field_name = str(row[field_col]).strip()
+            description = str(row[desc_col]).strip()
+            if field_name and description:
+                column_descriptions[field_name] = description
+    
+    return column_descriptions
 
 # Checkbox to analyze data
 analyze_data_checkbox = st.checkbox("Analyze CSV Data with AI")
@@ -87,56 +114,151 @@ def analyze_data_for_question(question, transaction_data, dictionary_data=None):
     # Prepare data summary
     data_stats = {}
     
-    # Basic statistics
-    if 'date' in transaction_data.columns or 'Date' in transaction_data.columns:
-        date_col = 'date' if 'date' in transaction_data.columns else 'Date'
-        transaction_data[date_col] = pd.to_datetime(transaction_data[date_col], errors='coerce')
-        
+    # Process all columns, not just a subset
+    all_columns = transaction_data.columns.tolist()
+    data_stats["all_columns"] = all_columns
+    data_stats["row_count"] = len(transaction_data)
+    
+    # Basic column type information
+    data_stats["column_types"] = {col: str(transaction_data[col].dtype) for col in all_columns}
+    
+    # Identify and process date columns
+    date_columns = []
+    for col in all_columns:
+        # Check if column name suggests a date
+        if any(date_term in col.lower() for date_term in ['date', 'time', 'day', 'month', 'year']):
+            try:
+                transaction_data[col] = pd.to_datetime(transaction_data[col], errors='coerce')
+                date_columns.append(col)
+                data_stats[f"{col}_is_date"] = True
+            except:
+                pass
+    
+    # Explicitly detect date columns by trying to convert them
+    for col in transaction_data.select_dtypes(include=['object']).columns:
+        if col not in date_columns:
+            # Try to convert to datetime
+            try:
+                temp_series = pd.to_datetime(transaction_data[col], errors='coerce')
+                # If >50% of values converted successfully, consider it a date
+                if temp_series.notna().sum() > len(transaction_data) * 0.5:
+                    transaction_data[col] = temp_series
+                    date_columns.append(col)
+                    data_stats[f"{col}_is_date"] = True
+            except:
+                pass
+    
     # Get column summaries for numeric columns
     for col in transaction_data.select_dtypes(include=['number']).columns:
         data_stats[col] = {
             "sum": float(transaction_data[col].sum()),
             "mean": float(transaction_data[col].mean()),
+            "median": float(transaction_data[col].median()),
             "max": float(transaction_data[col].max()),
-            "min": float(transaction_data[col].min())
+            "min": float(transaction_data[col].min()),
+            "std": float(transaction_data[col].std()),
+            "null_count": int(transaction_data[col].isna().sum()),
+            "null_percentage": float(transaction_data[col].isna().mean() * 100)
         }
     
     # Get basic info about categorical columns
-    for col in transaction_data.select_dtypes(include=['object']).columns:
-        # Convert value_counts to regular Python dict with native types
-        top_values = transaction_data[col].value_counts().head(5).to_dict()
-        top_values_native = {str(k): int(v) for k, v in top_values.items()}
-        
-        data_stats[col] = {
-            "unique_values": int(transaction_data[col].nunique()),
-            "top_values": top_values_native
-        }
-    
-    # If there are date columns, get month-wise aggregations
-    date_columns = transaction_data.select_dtypes(include=['datetime64']).columns
-    if len(date_columns) > 0:
-        for date_col in date_columns:
-            transaction_data[f'month_{date_col}'] = transaction_data[date_col].dt.month
-            transaction_data[f'year_{date_col}'] = transaction_data[date_col].dt.year
+    for col in transaction_data.select_dtypes(include=['object', 'category']).columns:
+        if col not in date_columns:
+            # Convert value_counts to regular Python dict with native types
+            value_counts = transaction_data[col].value_counts()
+            top_values = value_counts.head(10).to_dict()
+            top_values_native = {str(k): int(v) for k, v in top_values.items()}
             
-            # Add monthly aggregations if there's an amount/price column
+            data_stats[col] = {
+                "unique_values": int(transaction_data[col].nunique()),
+                "top_values": top_values_native,
+                "null_count": int(transaction_data[col].isna().sum()),
+                "null_percentage": float(transaction_data[col].isna().mean() * 100)
+            }
+            
+            # For columns with few unique values (<20), include percentage distribution
+            if transaction_data[col].nunique() < 20:
+                percentage_dict = (value_counts / len(transaction_data) * 100).to_dict()
+                data_stats[col]["value_percentages"] = {str(k): float(v) for k, v in percentage_dict.items()}
+    
+    # Process date columns
+    for date_col in date_columns:
+        if transaction_data[date_col].notna().any():
+            # Basic date statistics
+            data_stats[date_col] = {
+                "min_date": transaction_data[date_col].min().strftime('%Y-%m-%d'),
+                "max_date": transaction_data[date_col].max().strftime('%Y-%m-%d'),
+                "null_count": int(transaction_data[date_col].isna().sum()),
+                "null_percentage": float(transaction_data[date_col].isna().mean() * 100)
+            }
+            
+            # Extract time components
+            transaction_data[f'year_{date_col}'] = transaction_data[date_col].dt.year
+            transaction_data[f'month_{date_col}'] = transaction_data[date_col].dt.month
+            transaction_data[f'day_{date_col}'] = transaction_data[date_col].dt.day
+            
+            # Create month-year string for readable grouping
+            transaction_data[f'month_year_{date_col}'] = transaction_data[date_col].dt.strftime('%Y-%m')
+            
+            # Monthly distribution
+            monthly_counts = transaction_data[f'month_year_{date_col}'].value_counts().sort_index().to_dict()
+            data_stats[f"{date_col}_monthly_distribution"] = {str(k): int(v) for k, v in monthly_counts.items()}
+            
+            # Find numeric columns that might represent values to aggregate
             numeric_cols = transaction_data.select_dtypes(include=['number']).columns
-            for num_col in numeric_cols:
-                if 'amount' in num_col.lower() or 'price' in num_col.lower() or 'sale' in num_col.lower() or 'revenue' in num_col.lower():
-                    monthly_data = transaction_data.groupby([f'year_{date_col}', f'month_{date_col}'])[num_col].sum().reset_index()
-                    # Convert DataFrame to dict and ensure all values are native Python types
-                    monthly_dict = []
-                    for _, row in monthly_data.iterrows():
-                        month_entry = {}
-                        for col_name in monthly_data.columns:
-                            value = row[col_name]
-                            if isinstance(value, (pd.Timestamp, pd._libs.tslibs.timestamps.Timestamp)):
-                                month_entry[col_name] = value.strftime('%Y-%m-%d')
-                            else:
-                                month_entry[col_name] = convert_to_native_types(value)
-                        monthly_dict.append(month_entry)
+            value_cols = [col for col in numeric_cols if any(term in col.lower() for term in 
+                         ['amount', 'price', 'revenue', 'sales', 'cost', 'profit', 'qty', 'quantity', 'value'])]
+            
+            # If no obvious value columns, use all numeric columns
+            if not value_cols:
+                value_cols = numeric_cols
+            
+            # For each value column, create monthly aggregations
+            for value_col in value_cols:
+                # Monthly aggregation by sum
+                monthly_agg = transaction_data.groupby(f'month_year_{date_col}')[value_col].agg(['sum', 'mean', 'count']).reset_index()
+                monthly_agg.columns = [f'month_year_{date_col}', f'sum_{value_col}', f'avg_{value_col}', f'count_{value_col}']
+                
+                # Convert to list of dictionaries for easier JSON conversion
+                monthly_data = []
+                for _, row in monthly_agg.iterrows():
+                    entry = {}
+                    for col_name in monthly_agg.columns:
+                        entry[col_name] = convert_to_native_types(row[col_name])
+                    monthly_data.append(entry)
+                
+                data_stats[f"monthly_{date_col}_{value_col}"] = monthly_data
+    
+            # Look for potential category columns to do cross analysis
+            categorical_cols = [col for col in transaction_data.select_dtypes(include=['object', 'category']).columns 
+                               if col not in date_columns and transaction_data[col].nunique() < 20]
+            
+            # For each categorical column, create aggregations
+            for cat_col in categorical_cols:
+                # For each value column, aggregate by category
+                for value_col in value_cols:
+                    category_agg = transaction_data.groupby(cat_col)[value_col].agg(['sum', 'mean', 'count']).reset_index()
+                    category_agg.columns = [cat_col, f'sum_{value_col}', f'avg_{value_col}', f'count_{value_col}']
                     
-                    data_stats[f'monthly_{num_col}'] = monthly_dict
+                    # Convert to list of dictionaries for easier JSON conversion
+                    category_data = []
+                    for _, row in category_agg.iterrows():
+                        entry = {}
+                        for col_name in category_agg.columns:
+                            entry[col_name] = convert_to_native_types(row[col_name])
+                        category_data.append(entry)
+                    
+                    data_stats[f"{cat_col}_{value_col}_analysis"] = category_data
+    
+    # Add correlation matrix for numeric columns
+    if len(transaction_data.select_dtypes(include=['number']).columns) > 1:
+        corr_matrix = transaction_data.select_dtypes(include=['number']).corr().round(2)
+        corr_data = {}
+        for col1 in corr_matrix.columns:
+            corr_data[col1] = {}
+            for col2 in corr_matrix.columns:
+                corr_data[col1][col2] = float(corr_matrix.loc[col1, col2])
+        data_stats["correlation_matrix"] = corr_data
     
     # Make sure all values are JSON serializable
     return convert_to_native_types(data_stats)
@@ -156,60 +278,85 @@ if user_input := st.chat_input("Type your message here..."):
                     st.session_state.dictionary_data
                 )
                 
-                # Prepare data context
-                transaction_info = f"Transaction Data Columns: {', '.join(st.session_state.transaction_data.columns.tolist())}\n"
-                transaction_info += f"Number of records: {len(st.session_state.transaction_data)}\n\n"
+                # Prepare data context with ALL columns and their types
+                transaction_info = "Transaction Data Information:\n"
+                transaction_info += f"- Total Records: {len(st.session_state.transaction_data)}\n"
+                transaction_info += f"- Date Range: {detailed_analysis.get('date_min', 'N/A')} to {detailed_analysis.get('date_max', 'N/A')}\n\n"
                 
-                # Add dictionary context if available
-                dictionary_info = ""
+                # Add column information with their types
+                transaction_info += "Column Information:\n"
+                for col in st.session_state.transaction_data.columns:
+                    col_type = str(st.session_state.transaction_data[col].dtype)
+                    # Add description from dictionary if available
+                    col_description = st.session_state.column_descriptions.get(col, "No description available")
+                    transaction_info += f"- {col} (Type: {col_type}): {col_description}\n"
+                
+                # Add dictionary context in a structured way
+                dictionary_info = "Data Dictionary Information:\n"
                 if st.session_state.dictionary_data is not None:
-                    dictionary_info = "Data Dictionary Information:\n"
-                    for _, row in st.session_state.dictionary_data.iterrows():
-                        # Assuming dictionary has field_name and description columns
-                        field_cols = [col for col in st.session_state.dictionary_data.columns if 'field' in col.lower() or 'column' in col.lower()]
-                        desc_cols = [col for col in st.session_state.dictionary_data.columns if 'desc' in col.lower() or 'mean' in col.lower()]
-                        
-                        if field_cols and desc_cols:
-                            field = row[field_cols[0]]
-                            description = row[desc_cols[0]]
-                            dictionary_info += f"- {field}: {description}\n"
+                    for col_name, description in st.session_state.column_descriptions.items():
+                        dictionary_info += f"- {col_name}: {description}\n"
+                else:
+                    dictionary_info += "No data dictionary provided.\n"
+                
+                # Identify important metrics and insights from the analysis
+                insights = "Key Insights from Data Analysis:\n"
+                
+                # Check for date columns with time series data
+                time_series_data = [key for key in detailed_analysis.keys() if key.startswith("monthly_")]
+                if time_series_data:
+                    insights += "- Time series data is available for temporal analysis.\n"
+                
+                # Check for correlations
+                if "correlation_matrix" in detailed_analysis:
+                    # Find strongest correlations
+                    corr_matrix = detailed_analysis["correlation_matrix"]
+                    strong_correlations = []
+                    for col1 in corr_matrix:
+                        for col2 in corr_matrix[col1]:
+                            if col1 != col2 and abs(corr_matrix[col1][col2]) > 0.7:
+                                strong_correlations.append((col1, col2, corr_matrix[col1][col2]))
+                    
+                    if strong_correlations:
+                        insights += "- Strong correlations detected between:\n"
+                        for col1, col2, corr in strong_correlations[:3]:  # Show top 3
+                            insights += f"  * {col1} and {col2}: {corr:.2f}\n"
                 
                 # Generate AI response based on user input and data
-                # Convert detailed analysis to safe string representation for prompt
-                analysis_str = str(detailed_analysis)
-                
                 prompt = f"""
+                You are an intelligent data analyst assistant. Answer the following question using the provided data:
+                
                 User Question: {user_input}
                 
-                Transaction Data Information:
                 {transaction_info}
                 
-                Dictionary Information:
                 {dictionary_info}
                 
-                Detailed Analysis:
-                {analysis_str}
+                {insights}
                 
-                Please analyze the transaction data to answer the user's question.
-                If you're referring to specific months like January 2025 (Jan 2025), use the monthly aggregation data if available.
+                Detailed Analysis Data:
+                ```json
+                {json.dumps(detailed_analysis, indent=2)}
+                ```
+                
+                Important Instructions:
+                1. Provide a direct and concise answer based solely on the data provided
+                2. Reference specific data points, trends, or patterns from the analysis to support your answer
+                3. If you see time series data, discuss any trends over time
+                4. Use the data dictionary definitions to correctly interpret columns
+                5. If there are apparent relationships between variables, mention them
+                6. If you cannot answer the question with the available data, explain exactly what data is missing
+                7. Present any interesting insights you find, even if not directly asked
+                8. If appropriate, suggest a visualization that would help illustrate your answer
+                9. Format currency values with appropriate symbols if applicable
+                10. Be precise with numbers - use exact figures from the data
+                
+                Your answer should be thorough yet concise, focusing on the most important insights related to the user's question.
                 """
                 
+                # Generate response with the comprehensive prompt
                 response = model.generate_content(prompt)
-                answer = response.text
-                
-                # Create a summarized explanation with customer persona insights
-                explain_the_results = f'''
-                The user asked: {user_input}
-                Here is the result: {answer}
-                
-                Please answer the question directly and concisely based on the data provided.
-                If the data shows regular patterns or specific preferences, include your opinions about the persona of this customer.
-                Use data points to support any persona insights.
-                If you cannot answer the question with the available data, explain specifically what data is missing.
-                '''
-                
-                final_response = model.generate_content(explain_the_results)
-                bot_response = final_response.text
+                bot_response = response.text
                 
                 st.session_state.chat_history.append(("assistant", bot_response))
                 st.chat_message("assistant").markdown(bot_response)
