@@ -26,66 +26,65 @@ if "uploaded_data" not in st.session_state:
     st.session_state.uploaded_data = None
 if "data_dict_text" not in st.session_state:
     st.session_state.data_dict_text = ""
-if "data_loaded" not in st.session_state:
-    st.session_state.data_loaded = False
-if "dict_loaded" not in st.session_state:
-    st.session_state.dict_loaded = False
+if "columns_explained" not in st.session_state:
+    st.session_state.columns_explained = False
 
 # Display previous chat history
 for role, message in st.session_state.chat_history:
     st.chat_message(role).markdown(message)
 
-# Creating columns for file uploaders
+# File upload section with columns for better layout
 col1, col2 = st.columns(2)
 
-# Upload CSV for analysis
+# Upload CSV for analysis in the first column
 with col1:
     st.subheader("Upload Transaction Data")
-    uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"], key="transaction")
+    uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"], key="transaction_data")
     if uploaded_file is not None:
         try:
             st.session_state.uploaded_data = pd.read_csv(uploaded_file)
-            st.session_state.data_loaded = True
-            st.success("Transaction data successfully uploaded and read.")
+            st.success("Transaction data successfully uploaded.")
             st.write("### Transaction Data Preview")
             st.dataframe(st.session_state.uploaded_data.head())
         except Exception as e:
-            st.error(f"Failed to load CSV file: {e}")
+            st.error(f"Failed to load transaction data: {e}")
 
-# Upload Data Dictionary
+# Upload Data Dictionary in the second column
 with col2:
     st.subheader("Upload Data Dictionary")
-    data_dict_file = st.file_uploader("Choose a Data Dictionary file (CSV or TXT)", type=["csv", "txt"], key="dictionary")
+    data_dict_file = st.file_uploader("Choose a Data Dictionary file (CSV or TXT)", type=["csv", "txt"], key="data_dict")
     if data_dict_file is not None:
         try:
             if data_dict_file.name.endswith(".csv"):
                 df_dict = pd.read_csv(data_dict_file)
                 st.session_state.data_dict_text = df_dict.to_string()
-            else:
-                st.session_state.data_dict_text = data_dict_file.read().decode("utf-8")
-            st.session_state.dict_loaded = True
-            st.success("Data Dictionary loaded successfully.")
-            st.write("### Data Dictionary Preview")
-            if data_dict_file.name.endswith(".csv"):
+                # Display preview of the data dictionary
+                st.success("Data Dictionary loaded successfully.")
+                st.write("### Data Dictionary Preview")
                 st.dataframe(df_dict.head())
             else:
-                st.text_area("Dictionary Content", st.session_state.data_dict_text, height=150)
+                content = data_dict_file.read().decode("utf-8")
+                st.session_state.data_dict_text = content
+                st.success("Data Dictionary loaded successfully.")
+                st.write("### Data Dictionary Preview")
+                st.text(content[:500] + "..." if len(content) > 500 else content)
         except Exception as e:
             st.error(f"Failed to load Data Dictionary: {e}")
 
-# Check if both files are loaded
-if st.session_state.data_loaded and st.session_state.dict_loaded:
-    st.success("Both transaction data and data dictionary are loaded! You can now analyze the data.")
-else:
-    if not st.session_state.data_loaded and not st.session_state.dict_loaded:
-        st.warning("Please upload both transaction data and data dictionary.")
-    elif not st.session_state.data_loaded:
-        st.warning("Please upload transaction data.")
-    else:
-        st.warning("Please upload data dictionary.")
+# Status indicators and controls
+status_col1, status_col2 = st.columns(2)
+with status_col1:
+    has_transaction = st.session_state.uploaded_data is not None
+    has_dictionary = st.session_state.data_dict_text != ""
+    st.info(f"Transaction Data: {'✅ Loaded' if has_transaction else '❌ Not Loaded'}")
+    st.info(f"Data Dictionary: {'✅ Loaded' if has_dictionary else '❌ Not Loaded'}")
 
-# Checkbox to trigger analysis
-analyze_data_checkbox = st.checkbox("Analyze Data with AI", value=True)
+with status_col2:
+    # Checkbox to trigger analysis
+    analyze_data_checkbox = st.checkbox("Analyze Data with AI", value=True)
+    # Checkbox to always include dictionary context
+    always_use_dict = st.checkbox("Always Include Dictionary Context", value=True, 
+                                help="Always include data dictionary context in every query")
 
 # User input
 if user_input := st.chat_input("Type your message here..."):
@@ -94,63 +93,61 @@ if user_input := st.chat_input("Type your message here..."):
     
     if model:
         try:
-            if st.session_state.data_loaded and st.session_state.dict_loaded and analyze_data_checkbox:
-                # Create a well-structured prompt that connects the dictionary to the transaction data
+            if st.session_state.uploaded_data is not None and analyze_data_checkbox:
+                # Get data summary
+                data_description = st.session_state.uploaded_data.describe().to_string()
                 data_columns = ", ".join(st.session_state.uploaded_data.columns.tolist())
-                data_sample = st.session_state.uploaded_data.head(5).to_string()
-                data_stats = st.session_state.uploaded_data.describe().to_string()
                 
-                prompt = f"""
-I need you to analyze transaction data using the data dictionary provided.
-
-DATA DICTIONARY:
+                # Prepare context from data dictionary
+                dict_context = ""
+                if st.session_state.data_dict_text:
+                    dict_context = f"""
+Data Dictionary Information:
 {st.session_state.data_dict_text}
 
-TRANSACTION DATA COLUMNS:
-{data_columns}
+The data dictionary above explains the meaning of each column in the transaction data.
+When answering questions about the transaction data, please refer to this dictionary to understand what each column represents.
+"""
+                
+                # Create a comprehensive prompt that includes the data dictionary context
+                prompt = f"""
+I have a question about my transaction data: {user_input}
 
-TRANSACTION DATA SAMPLE (First 5 rows):
-{data_sample}
+Transaction Data Information:
+- Columns in the dataset: {data_columns}
+- Data summary statistics: 
+{data_description}
 
-TRANSACTION DATA STATISTICS:
-{data_stats}
+{dict_context if st.session_state.data_dict_text and (always_use_dict or "dictionary" in user_input.lower() or "explain" in user_input.lower() or "what is" in user_input.lower()) else ""}
 
-USER QUERY:
-{user_input}
-
-Instructions:
-1. Use the data dictionary to understand what each column in the transaction data means
-2. Reference the dictionary definitions when explaining results
-3. Provide clear explanations of any insights or patterns
-4. If the user's query requires specific analysis of certain columns, focus on those
-5. Thai language responses are acceptable - respond in the same language as the user's query
+Please analyze the transaction data to answer my question. If my question refers to specific columns or terms, use the data dictionary to understand what they mean.
 """
                 response = model.generate_content(prompt)
                 bot_response = response.text
             elif not analyze_data_checkbox:
                 bot_response = "Data analysis is disabled. Please select the 'Analyze Data with AI' checkbox to enable analysis."
-            elif not st.session_state.data_loaded:
-                bot_response = "Please upload transaction data first."
-            elif not st.session_state.dict_loaded:
-                bot_response = "Please upload a data dictionary to help me understand the transaction data."
             else:
-                # Just a regular chat without data analysis
-                response = model.generate_content(user_input)
-                bot_response = response.text
-                
+                bot_response = "Please upload both transaction data and data dictionary files first, then ask me to analyze them."
+            
             st.session_state.chat_history.append(("assistant", bot_response))
             st.chat_message("assistant").markdown(bot_response)
         except Exception as e:
             st.error(f"An error occurred while generating the response: {e}")
-            st.error(str(e))
     else:
         st.warning("Please configure the Gemini API Key to enable chat responses.")
 
-# Add a section to display data dictionary information
-if st.session_state.dict_loaded:
-    with st.expander("Data Dictionary Reference"):
-        st.write("Use this reference to understand the transaction data columns:")
-        if data_dict_file.name.endswith(".csv"):
-            st.dataframe(df_dict)
-        else:
-            st.text(st.session_state.data_dict_text)
+# Add explanation of how to use the app
+with st.expander("How to use this app"):
+    st.markdown("""
+    1. **Upload your transaction data** (CSV file)
+    2. **Upload your data dictionary** (CSV or TXT file that explains each column in your transaction data)
+    3. **Ask questions** about your transaction data
+    4. The AI will use the data dictionary to understand column meanings when analyzing your data
+    
+    **Example questions you can ask:**
+    - Show me a summary of the transaction data
+    - What is the average value of [column name]?
+    - Can you explain what the column [column name] means?
+    - Find transactions with the highest values
+    - Analyze spending patterns in the data
+    """)
