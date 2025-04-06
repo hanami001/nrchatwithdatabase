@@ -51,6 +51,28 @@ with col1:
         except Exception as e:
             st.error(f"An error occurred while reading the transaction file: {e}")
 
+# Function to process the data dictionary into a usable format
+def process_data_dictionary(dict_data):
+    column_descriptions = {}
+    
+    # Try to identify field name and description columns
+    field_cols = [col for col in dict_data.columns if any(term in col.lower() for term in ['field', 'column', 'variable', 'name'])]
+    desc_cols = [col for col in dict_data.columns if any(term in col.lower() for term in ['desc', 'definition', 'meaning', 'explanation', 'info'])]
+    
+    # If we found at least one field column and one description column
+    if field_cols and desc_cols:
+        field_col = field_cols[0]
+        desc_col = desc_cols[0]
+        
+        # Create a dictionary mapping field names to descriptions
+        for _, row in dict_data.iterrows():
+            field_name = str(row[field_col]).strip()
+            description = str(row[desc_col]).strip()
+            if field_name and description:
+                column_descriptions[field_name] = description
+    
+    return column_descriptions
+
 # Upload Data Dictionary
 with col2:
     st.subheader("Upload Data Dictionary")
@@ -67,8 +89,6 @@ with col2:
             st.session_state.column_descriptions = process_data_dictionary(dict_data)
         except Exception as e:
             st.error(f"An error occurred while reading the dictionary file: {e}")
-
-# Function to process the data dictionary into a usable format
 def process_data_dictionary(dict_data):
     column_descriptions = {}
     
