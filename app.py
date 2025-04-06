@@ -7,8 +7,8 @@ st.title("🤖 My Chatbot and Data Analysis App")
 st.subheader("Conversation and Data Analysis")
 
 # Capture Gemini API Key
-key = st.secrets['gemini_api_key']
-genai.configure(api_key=key)
+gemini_api_key = st.secrets['gemini_api_key']
+genai.configure(api_key=gemini_api_key)
 model = genai.GenerativeModel('gemini-2.0-flash-lite')
 
 # Initialize the Gemini Model
