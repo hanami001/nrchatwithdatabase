@@ -62,12 +62,12 @@ if "df" in st.session_state and "dict_df" in st.session_state:
     st.subheader("🧠 Ask Anything About the Data")
     user_query = st.text_area("Type your question here")
 
-    if st.button("Ask"):
-        if user_query:
-            sample_data = df.head(5).to_csv(index=False)
-            dict_text = dict_df.to_csv(index=False)
+if st.button("Ask"):
+    if user_query:
+        sample_data = df.head(5).to_csv(index=False)
+        dict_text = dict_df.to_csv(index=False)
 
-            prompt = f"""
+        prompt = f"""
 You are a data assistant helping to analyze CSV data using pandas.
 
 Here is a sample of the CSV:
@@ -76,14 +76,29 @@ Here is a sample of the CSV:
 Here is the data dictionary:
 {dict_text}
 
-Now answer the following question using Python pandas code:
+Now answer the following question using Python pandas code only:
 {user_query}
 """
 
-            try:
-                response = model.generate_content(prompt)
-                st.code(response.text, language="python")
-            except Exception as e:
-                st.error(f"❌ Gemini Error: {str(e)}")
-        else:
-            st.warning("Please enter a question.")
+        try:
+            response = model.generate_content(prompt)
+            code = response.text.strip()
+            st.subheader("🧾 Generated Code")
+            st.code(code, language="python")
+
+            # --- Run the code safely ---
+            local_env = {'pd': pd, 'df': df}  # only allow safe variables
+            exec(code, {}, local_env)
+
+            # --- Try to find a result dataframe in local_env ---
+            possible_dfs = [v for v in local_env.values() if isinstance(v, pd.DataFrame)]
+            if possible_dfs:
+                st.subheader("📊 Result from Code")
+                st.dataframe(possible_dfs[0])
+            else:
+                st.info("ℹ️ No DataFrame was returned by the code.")
+
+        except Exception as e:
+            st.error(f"❌ Error executing code: {str(e)}")
+    else:
+        st.warning("Please enter a question.")
