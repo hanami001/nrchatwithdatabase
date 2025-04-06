@@ -8,8 +8,6 @@ st.subheader("Conversation and Data Analysis")
 
 # Capture Gemini API Key
 gemini_api_key = st.secrets['gemini_api_key']
-genai.configure(api_key=gemini_api_key)
-model = genai.GenerativeModel('gemini-2.0-flash-lite')
 
 # Initialize the Gemini Model
 model = None
@@ -17,7 +15,7 @@ if gemini_api_key:
     try:
         # Configure Gemini with the provided API Key
         genai.configure(api_key=gemini_api_key)
-        model = genai.GenerativeModel("gemini-pro")
+        model = genai.GenerativeModel("gemini-2.0-flash-lite")
         st.success("Gemini API Key successfully configured.")
     except Exception as e:
         st.error(f"An error occurred while setting up the Gemini model: {e}")
