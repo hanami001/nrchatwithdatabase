@@ -24,8 +24,8 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "uploaded_data" not in st.session_state:
     st.session_state.uploaded_data = None
-if "data_dictionary" not in st.session_state:
-    st.session_state.data_dictionary = None
+if "dictionary_data" not in st.session_state:
+    st.session_state.dictionary_data = None
 
 # Display chat history
 for role, message in st.session_state.chat_history:
@@ -50,13 +50,13 @@ with col1:
 # Upload Data Dictionary
 with col2:
     st.subheader("Upload Data Dictionary")
-    dictionary_file = st.file_uploader("Choose a dictionary file", type=["csv"], key="data_dictionary")
+    dictionary_file = st.file_uploader("Choose a dictionary file", type=["csv"], key="dict_file_uploader")
     if dictionary_file is not None:
         try:
-            st.session_state.data_dictionary = pd.read_csv(dictionary_file)
+            st.session_state.dictionary_data = pd.read_csv(dictionary_file)
             st.success("Data dictionary successfully uploaded and read.")
             st.write("### Data Dictionary Preview")
-            st.dataframe(st.session_state.data_dictionary.head())
+            st.dataframe(st.session_state.dictionary_data.head())
         except Exception as e:
             st.error(f"An error occurred while reading the dictionary file: {e}")
 
@@ -76,9 +76,9 @@ if user_input := st.chat_input("Type your message here..."):
                 data_context += st.session_state.uploaded_data.describe().to_string()
                 
                 # Add dictionary context if available
-                if st.session_state.data_dictionary is not None:
+                if st.session_state.dictionary_data is not None:
                     data_context += "\n\nData Dictionary:\n"
-                    data_context += st.session_state.data_dictionary.to_string()
+                    data_context += st.session_state.dictionary_data.to_string()
                 
                 # Generate AI response based on user input and data
                 prompt = f"""
@@ -115,7 +115,7 @@ if user_input := st.chat_input("Type your message here..."):
                 bot_response = "Please upload a transaction CSV file first, then ask me to analyze it."
                 st.session_state.chat_history.append(("assistant", bot_response))
                 st.chat_message("assistant").markdown(bot_response)
-            elif st.session_state.data_dictionary is None:
+            elif st.session_state.dictionary_data is None:
                 bot_response = "Transaction data uploaded, but data dictionary is missing. For best results, please upload both files."
                 st.session_state.chat_history.append(("assistant", bot_response))
                 st.chat_message("assistant").markdown(bot_response)
