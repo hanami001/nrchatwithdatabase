@@ -28,6 +28,8 @@ if "data_dict_text" not in st.session_state:
     st.session_state.data_dict_text = ""
 if "columns_explained" not in st.session_state:
     st.session_state.columns_explained = False
+if "user_persona" not in st.session_state:
+    st.session_state.user_persona = {}
 
 # Display previous chat history
 for role, message in st.session_state.chat_history:
@@ -85,6 +87,16 @@ with status_col2:
     # Checkbox to always include dictionary context
     always_use_dict = st.checkbox("Always Include Dictionary Context", value=True, 
                                 help="Always include data dictionary context in every query")
+    # Response length control
+    response_length = st.select_slider(
+        "Response Length",
+        options=["Very Brief", "Brief", "Moderate", "Detailed", "Comprehensive"],
+        value="Moderate",
+        help="Control how detailed the AI responses should be"
+    )
+    # Add persona analysis option
+    include_persona = st.checkbox("Include Customer Persona Analysis", value=True,
+                                help="Include analysis of customer behavior and characteristics")
 
 # User input
 if user_input := st.chat_input("Type your message here..."):
@@ -109,7 +121,16 @@ The data dictionary above explains the meaning of each column in the transaction
 When answering questions about the transaction data, please refer to this dictionary to understand what each column represents.
 """
                 
-                # Create a comprehensive prompt that includes the data dictionary context
+                # Response length instructions
+                length_instructions = {
+                    "Very Brief": "Provide an extremely concise answer in 1-2 sentences maximum. Focus only on the key facts.",
+                    "Brief": "Keep your response short and to the point, using no more than 3-4 sentences.",
+                    "Moderate": "Provide a balanced answer with sufficient detail but avoid being overly verbose.",
+                    "Detailed": "Include comprehensive details and explanations in your answer.",
+                    "Comprehensive": "Provide an in-depth analysis with all relevant details and supporting information."
+                }
+                
+                # Create a comprehensive prompt that includes the data dictionary context and response length control
                 prompt = f"""
 I have a question about my transaction data: {user_input}
 
@@ -120,10 +141,36 @@ Transaction Data Information:
 
 {dict_context if st.session_state.data_dict_text and (always_use_dict or "dictionary" in user_input.lower() or "explain" in user_input.lower() or "what is" in user_input.lower()) else ""}
 
+Response Instructions:
+{length_instructions[response_length]}
+
 Please analyze the transaction data to answer my question. If my question refers to specific columns or terms, use the data dictionary to understand what they mean.
 """
+                # Get initial response from Gemini
                 response = model.generate_content(prompt)
-                bot_response = response.text
+                initial_answer = response.text
+                
+                # Generate customer persona if enabled
+                if include_persona and st.session_state.uploaded_data is not None:
+                    # Update the prompt to include persona analysis
+                    explain_prompt = f"""
+The user asked: {user_input}
+
+Here is the analysis result: {initial_answer}
+
+Based on the user's question and the transaction data, provide:
+1. A {response_length.lower()} answer to the user's question
+2. A brief summary of the key insights
+3. Your analysis of the customer persona based on the transaction patterns
+
+For the persona analysis, consider spending habits, transaction frequency, average transaction values, and any other insights you can glean from the data.
+"""
+                    # Get enhanced response with persona
+                    enhanced_response = model.generate_content(explain_prompt)
+                    bot_response = enhanced_response.text
+                else:
+                    bot_response = initial_answer
+                    
             elif not analyze_data_checkbox:
                 bot_response = "Data analysis is disabled. Please select the 'Analyze Data with AI' checkbox to enable analysis."
             else:
@@ -141,8 +188,12 @@ with st.expander("How to use this app"):
     st.markdown("""
     1. **Upload your transaction data** (CSV file)
     2. **Upload your data dictionary** (CSV or TXT file that explains each column in your transaction data)
-    3. **Ask questions** about your transaction data
-    4. The AI will use the data dictionary to understand column meanings when analyzing your data
+    3. **Set your preferences**:
+       - Choose response length
+       - Enable/disable persona analysis
+       - Control dictionary context inclusion
+    4. **Ask questions** about your transaction data
+    5. The AI will use the data dictionary to understand column meanings when analyzing your data
     
     **Example questions you can ask:**
     - Show me a summary of the transaction data
@@ -150,4 +201,5 @@ with st.expander("How to use this app"):
     - Can you explain what the column [column name] means?
     - Find transactions with the highest values
     - Analyze spending patterns in the data
+    - What does my transaction history say about me as a customer?
     """)
