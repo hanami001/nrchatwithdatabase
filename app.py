@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import os
 import google.generativeai as genai
 
 # --- Page Config ---
@@ -15,6 +16,9 @@ except Exception as e:
     st.error("⚠️ Unable to load Gemini API key from secrets.")
     st.stop()
 
+# --- Ensure 'files/' folder exists ---
+os.makedirs("files", exist_ok=True)
+
 # --- Upload Form ---
 st.subheader("📂 Upload Your Files")
 
@@ -25,10 +29,21 @@ with st.form("upload_form"):
 
 if submitted:
     if data_dict_file is not None and data_file is not None:
-        dict_df = pd.read_csv(data_dict_file)
-        df = pd.read_csv(data_file)
+        # Save uploaded files to /files folder
+        data_dict_path = os.path.join("files", "data_dictionary.csv")
+        data_file_path = os.path.join("files", "your_data.csv")
 
-        st.success("✅ Files uploaded successfully!")
+        with open(data_dict_path, "wb") as f:
+            f.write(data_dict_file.read())
+
+        with open(data_file_path, "wb") as f:
+            f.write(data_file.read())
+
+        # Load data from saved files
+        dict_df = pd.read_csv(data_dict_path)
+        df = pd.read_csv(data_file_path)
+
+        st.success("✅ Files uploaded and saved to /files!")
 
         # --- Show Data Dictionary ---
         st.subheader("📘 Data Dictionary")
