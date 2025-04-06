@@ -31,6 +31,8 @@ if "column_descriptions" not in st.session_state:
     st.session_state.column_descriptions = {}
 if "dictionary_formatted_text" not in st.session_state:
     st.session_state.dictionary_formatted_text = ""
+if "show_data_preview" not in st.session_state:
+    st.session_state.show_data_preview = True
 
 # Display chat history
 for role, message in st.session_state.chat_history:
@@ -48,8 +50,11 @@ with col1:
             data = pd.read_csv(transaction_file)
             st.session_state.transaction_data = data
             st.success("Transaction data successfully uploaded and read.")
-            st.write("### Transaction Data Preview")
-            st.dataframe(data.head())
+            
+            # Only show preview if show_data_preview is True
+            if st.session_state.show_data_preview:
+                st.write("### Transaction Data Preview")
+                st.dataframe(data.head())
         except Exception as e:
             st.error(f"An error occurred while reading the transaction file: {e}")
 
@@ -388,6 +393,9 @@ def analyze_data_for_question(question, transaction_data, dictionary_data=None):
 
 # Capture input and generate response
 if user_input := st.chat_input("Type your message here..."):
+    # Set show_data_preview to False when user asks a question
+    st.session_state.show_data_preview = False
+    
     st.session_state.chat_history.append(("user", user_input))
     st.chat_message("user").markdown(user_input)
     
