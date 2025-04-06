@@ -146,4 +146,11 @@ Instructions:
     else:
         st.warning("Please configure the Gemini API Key to enable chat responses.")
 
-# Data dictionary is loaded internally but not displayed on the app interface
+# Add a section to display data dictionary information
+if st.session_state.dict_loaded:
+    with st.expander("Data Dictionary Reference"):
+        st.write("Use this reference to understand the transaction data columns:")
+        if data_dict_file.name.endswith(".csv"):
+            st.dataframe(df_dict)
+        else:
+            st.text(st.session_state.data_dict_text)
