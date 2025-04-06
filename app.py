@@ -66,6 +66,22 @@ with col2:
 # Checkbox to analyze data
 analyze_data_checkbox = st.checkbox("Analyze CSV Data with AI")
 
+# Function to convert NumPy types to Python native types for JSON serialization
+def convert_to_native_types(obj):
+    import numpy as np
+    if isinstance(obj, (np.integer, np.int64)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: convert_to_native_types(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_native_types(i) for i in obj]
+    else:
+        return obj
+
 # Function to perform detailed data analysis
 def analyze_data_for_question(question, transaction_data, dictionary_data=None):
     # Prepare data summary
@@ -79,17 +95,21 @@ def analyze_data_for_question(question, transaction_data, dictionary_data=None):
     # Get column summaries for numeric columns
     for col in transaction_data.select_dtypes(include=['number']).columns:
         data_stats[col] = {
-            "sum": transaction_data[col].sum(),
-            "mean": transaction_data[col].mean(),
-            "max": transaction_data[col].max(),
-            "min": transaction_data[col].min()
+            "sum": float(transaction_data[col].sum()),
+            "mean": float(transaction_data[col].mean()),
+            "max": float(transaction_data[col].max()),
+            "min": float(transaction_data[col].min())
         }
     
     # Get basic info about categorical columns
     for col in transaction_data.select_dtypes(include=['object']).columns:
+        # Convert value_counts to regular Python dict with native types
+        top_values = transaction_data[col].value_counts().head(5).to_dict()
+        top_values_native = {str(k): int(v) for k, v in top_values.items()}
+        
         data_stats[col] = {
-            "unique_values": transaction_data[col].nunique(),
-            "top_values": transaction_data[col].value_counts().head(5).to_dict()
+            "unique_values": int(transaction_data[col].nunique()),
+            "top_values": top_values_native
         }
     
     # If there are date columns, get month-wise aggregations
@@ -104,9 +124,22 @@ def analyze_data_for_question(question, transaction_data, dictionary_data=None):
             for num_col in numeric_cols:
                 if 'amount' in num_col.lower() or 'price' in num_col.lower() or 'sale' in num_col.lower() or 'revenue' in num_col.lower():
                     monthly_data = transaction_data.groupby([f'year_{date_col}', f'month_{date_col}'])[num_col].sum().reset_index()
-                    data_stats[f'monthly_{num_col}'] = monthly_data.to_dict('records')
+                    # Convert DataFrame to dict and ensure all values are native Python types
+                    monthly_dict = []
+                    for _, row in monthly_data.iterrows():
+                        month_entry = {}
+                        for col_name in monthly_data.columns:
+                            value = row[col_name]
+                            if isinstance(value, (pd.Timestamp, pd._libs.tslibs.timestamps.Timestamp)):
+                                month_entry[col_name] = value.strftime('%Y-%m-%d')
+                            else:
+                                month_entry[col_name] = convert_to_native_types(value)
+                        monthly_dict.append(month_entry)
+                    
+                    data_stats[f'monthly_{num_col}'] = monthly_dict
     
-    return data_stats
+    # Make sure all values are JSON serializable
+    return convert_to_native_types(data_stats)
 
 # Capture input and generate response
 if user_input := st.chat_input("Type your message here..."):
@@ -142,6 +175,9 @@ if user_input := st.chat_input("Type your message here..."):
                             dictionary_info += f"- {field}: {description}\n"
                 
                 # Generate AI response based on user input and data
+                # Convert detailed analysis to safe string representation for prompt
+                analysis_str = str(detailed_analysis)
+                
                 prompt = f"""
                 User Question: {user_input}
                 
@@ -152,7 +188,7 @@ if user_input := st.chat_input("Type your message here..."):
                 {dictionary_info}
                 
                 Detailed Analysis:
-                {json.dumps(detailed_analysis, indent=2)}
+                {analysis_str}
                 
                 Please analyze the transaction data to answer the user's question.
                 If you're referring to specific months like January 2025 (Jan 2025), use the monthly aggregation data if available.
