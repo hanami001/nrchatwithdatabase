@@ -76,27 +76,37 @@ Here is a sample of the CSV:
 Here is the data dictionary:
 {dict_text}
 
-Now answer the following question using Python pandas code only:
+Now answer the following question using Python pandas code only. 
+Do NOT redefine or reload df. Just assume df already exists:
 {user_query}
 """
 
         try:
             response = model.generate_content(prompt)
-            code = response.text.strip()
+            code_raw = response.text.strip()
+
+            # Remove markdown formatting and imports
+            lines = code_raw.splitlines()
+            cleaned_lines = [
+                line for line in lines
+                if not line.strip().startswith(("```", "import", "data =", "df = pd.read_csv"))
+            ]
+            code = "\n".join(cleaned_lines).strip()
+
             st.subheader("🧾 Generated Code")
             st.code(code, language="python")
 
             # --- Run the code safely ---
-            local_env = {'pd': pd, 'df': df}  # only allow safe variables
+            local_env = {'pd': pd, 'df': df}
             exec(code, {}, local_env)
 
-            # --- Try to find a result dataframe in local_env ---
+            # --- Show result if any dataframe created ---
             possible_dfs = [v for v in local_env.values() if isinstance(v, pd.DataFrame)]
             if possible_dfs:
                 st.subheader("📊 Result from Code")
                 st.dataframe(possible_dfs[0])
             else:
-                st.info("ℹ️ No DataFrame was returned by the code.")
+                st.info("ℹ️ Code executed but no DataFrame was returned.")
 
         except Exception as e:
             st.error(f"❌ Error executing code: {str(e)}")
