@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import os
 import google.generativeai as genai
 
 # --- Page Config ---
@@ -13,48 +12,42 @@ try:
     genai.configure(api_key=key)
     model = genai.GenerativeModel("gemini-2.0-flash-lite")
 except Exception as e:
-    st.error("⚠️ Unable to load Gemini API key from secrets. Please check your configuration.")
+    st.error("⚠️ Unable to load Gemini API key from secrets.")
     st.stop()
 
-# --- Load Data Dictionary ---
-@st.cache_data
-def load_data_dictionary():
-    path = os.path.join("files", "data_dictionary.csv")
-    return pd.read_csv(path)
+# --- Upload Form ---
+st.subheader("📂 Upload Your Files")
 
-# --- Load Main CSV ---
-@st.cache_data
-def load_main_data():
-    path = os.path.join("files", "your_data.csv")  # ← เปลี่ยนชื่อให้ตรงกับไฟล์จริง
-    return pd.read_csv(path)
+with st.form("upload_form"):
+    data_dict_file = st.file_uploader("Upload Data Dictionary CSV", type="csv", key="dict")
+    data_file = st.file_uploader("Upload Main Data CSV", type="csv", key="data")
+    submitted = st.form_submit_button("Load Files")
 
-# --- Show Data Dictionary ---
-st.subheader("📘 Data Dictionary")
-try:
-    dict_df = load_data_dictionary()
-    st.dataframe(dict_df)
-except FileNotFoundError:
-    st.error("⚠️ data_dictionary.csv not found in /files")
+if submitted:
+    if data_dict_file is not None and data_file is not None:
+        dict_df = pd.read_csv(data_dict_file)
+        df = pd.read_csv(data_file)
 
-# --- Show Main Data ---
-st.subheader("📊 Main CSV Data")
-try:
-    df = load_main_data()
-    st.dataframe(df.head(20))
-except FileNotFoundError:
-    st.error("⚠️ your_data.csv not found in /files")
+        st.success("✅ Files uploaded successfully!")
 
-# --- Chat Section ---
-st.subheader("🧠 Ask Anything About the Data")
+        # --- Show Data Dictionary ---
+        st.subheader("📘 Data Dictionary")
+        st.dataframe(dict_df)
 
-user_query = st.text_area("Type your question here")
+        # --- Show Main Data ---
+        st.subheader("📊 Main CSV Data")
+        st.dataframe(df.head(20))
 
-if st.button("Ask"):
-    if user_query and 'df' in locals():
-        sample_data = df.head(5).to_csv(index=False)
-        dict_text = dict_df.to_csv(index=False) if 'dict_df' in locals() else 'No data dictionary available.'
+        # --- Chat Section ---
+        st.subheader("🧠 Ask Anything About the Data")
+        user_query = st.text_area("Type your question here")
 
-        prompt = f"""
+        if st.button("Ask"):
+            if user_query:
+                sample_data = df.head(5).to_csv(index=False)
+                dict_text = dict_df.to_csv(index=False)
+
+                prompt = f"""
 You are a data assistant helping to analyze CSV data using pandas.
 
 Here is a sample of the CSV:
@@ -67,10 +60,12 @@ Now answer the following question using Python pandas code:
 {user_query}
 """
 
-        try:
-            response = model.generate_content(prompt)
-            st.code(response.text, language="python")
-        except Exception as e:
-            st.error(f"❌ Gemini Error: {str(e)}")
+                try:
+                    response = model.generate_content(prompt)
+                    st.code(response.text, language="python")
+                except Exception as e:
+                    st.error(f"❌ Gemini Error: {str(e)}")
+            else:
+                st.warning("Please enter a question.")
     else:
-        st.warning("Please load data and enter a question.")
+        st.warning("📌 Please upload both files before submitting.")
