@@ -31,58 +31,27 @@ if "column_descriptions" not in st.session_state:
     st.session_state.column_descriptions = {}
 if "dictionary_formatted_text" not in st.session_state:
     st.session_state.dictionary_formatted_text = ""
-if "show_file_uploaders" not in st.session_state:
-    st.session_state.show_file_uploaders = False
 
 # Display chat history
 for role, message in st.session_state.chat_history:
     st.chat_message(role).markdown(message)
 
-# Add a toggle button for showing/hiding file uploaders
-if st.button("Toggle File Upload Section", key="toggle_file_upload"):
-    st.session_state.show_file_uploaders = not st.session_state.show_file_uploaders
+# Create two columns for file uploaders
+col1, col2 = st.columns(2)
 
-# Only show the file upload section if toggle is on
-if st.session_state.show_file_uploaders:
-    # Create two columns for file uploaders
-    col1, col2 = st.columns(2)
-
-    # Upload CSV for analysis
-    with col1:
-        st.subheader("Upload Transaction Data")
-        transaction_file = st.file_uploader("Choose a CSV file", type=["csv"], key="transaction_uploader")
-        if transaction_file is not None:
-            try:
-                data = pd.read_csv(transaction_file)
-                st.session_state.transaction_data = data
-                st.success("Transaction data successfully uploaded and read.")
-                st.write("### Transaction Data Preview")
-                st.dataframe(data.head())
-            except Exception as e:
-                st.error(f"An error occurred while reading the transaction file: {e}")
-
-    # Upload Data Dictionary
-    with col2:
-        st.subheader("Upload Data Dictionary")
-        dictionary_file = st.file_uploader("Choose a dictionary file", type=["csv"], key="dictionary_uploader")
-        if dictionary_file is not None:
-            try:
-                dict_data = pd.read_csv(dictionary_file)
-                st.session_state.dictionary_data = dict_data
-                st.success("Data dictionary successfully uploaded and read.")
-                st.write("### Data Dictionary Preview")
-                st.dataframe(dict_data.head())
-                
-                # Process dictionary into a more usable format
-                st.session_state.column_descriptions, st.session_state.dictionary_formatted_text = process_data_dictionary(dict_data)
-            except Exception as e:
-                st.error(f"An error occurred while reading the dictionary file: {e}")
-
-    # Checkbox to analyze data
-    analyze_data_checkbox = st.checkbox("Analyze CSV Data with AI")
-else:
-    # If file uploaders are hidden, we still need the checkbox state for data analysis
-    analyze_data_checkbox = st.session_state.get("analyze_data_checkbox", False)
+# Upload CSV for analysis
+with col1:
+    st.subheader("Upload Transaction Data")
+    transaction_file = st.file_uploader("Choose a CSV file", type=["csv"], key="transaction_uploader")
+    if transaction_file is not None:
+        try:
+            data = pd.read_csv(transaction_file)
+            st.session_state.transaction_data = data
+            st.success("Transaction data successfully uploaded and read.")
+            st.write("### Transaction Data Preview")
+            st.dataframe(data.head())
+        except Exception as e:
+            st.error(f"An error occurred while reading the transaction file: {e}")
 
 # Function to process the data dictionary into a usable format
 def process_data_dictionary(dict_data):
@@ -206,6 +175,46 @@ def process_data_dictionary(dict_data):
     formatted_text = '\n'.join(formatted_lines)
     
     return column_descriptions, formatted_text
+
+# Upload Data Dictionary
+with col2:
+    st.subheader("Upload Data Dictionary")
+    dictionary_file = st.file_uploader("Choose a dictionary file", type=["csv"], key="dictionary_uploader")
+    if dictionary_file is not None:
+        try:
+            dict_data = pd.read_csv(dictionary_file)
+            st.session_state.dictionary_data = dict_data
+            st.success("Data dictionary successfully uploaded and read.")
+            st.write("### Data Dictionary Preview")
+            st.dataframe(dict_data.head())
+            
+            # Process dictionary into a more usable format
+            st.session_state.column_descriptions, st.session_state.dictionary_formatted_text = process_data_dictionary(dict_data)
+        except Exception as e:
+            st.error(f"An error occurred while reading the dictionary file: {e}")
+def process_data_dictionary(dict_data):
+    column_descriptions = {}
+    
+    # Try to identify field name and description columns
+    field_cols = [col for col in dict_data.columns if any(term in col.lower() for term in ['field', 'column', 'variable', 'name'])]
+    desc_cols = [col for col in dict_data.columns if any(term in col.lower() for term in ['desc', 'definition', 'meaning', 'explanation', 'info'])]
+    
+    # If we found at least one field column and one description column
+    if field_cols and desc_cols:
+        field_col = field_cols[0]
+        desc_col = desc_cols[0]
+        
+        # Create a dictionary mapping field names to descriptions
+        for _, row in dict_data.iterrows():
+            field_name = str(row[field_col]).strip()
+            description = str(row[desc_col]).strip()
+            if field_name and description:
+                column_descriptions[field_name] = description
+    
+    return column_descriptions
+
+# Checkbox to analyze data
+analyze_data_checkbox = st.checkbox("Analyze CSV Data with AI")
 
 # Function to convert NumPy types to Python native types for JSON serialization
 def convert_to_native_types(obj):
@@ -382,13 +391,9 @@ if user_input := st.chat_input("Type your message here..."):
     st.session_state.chat_history.append(("user", user_input))
     st.chat_message("user").markdown(user_input)
     
-    # Save the state of the analyze checkbox
-    if 'analyze_data_checkbox' in locals():
-        st.session_state.analyze_data_checkbox = analyze_data_checkbox
-    
     if model:
         try:
-            if st.session_state.transaction_data is not None and st.session_state.get('analyze_data_checkbox', False):
+            if st.session_state.transaction_data is not None and analyze_data_checkbox:
                 # Perform data analysis
                 detailed_analysis = analyze_data_for_question(
                     user_input, 
@@ -519,8 +524,12 @@ if user_input := st.chat_input("Type your message here..."):
                 
                 st.session_state.chat_history.append(("assistant", bot_response))
                 st.chat_message("assistant").markdown(bot_response)
-            elif st.session_state.transaction_data is None and st.session_state.get('analyze_data_checkbox', False):
-                bot_response = "Please upload a transaction CSV file first by clicking the 'Toggle File Upload Section' button, then ask me to analyze it."
+            elif not analyze_data_checkbox:
+                bot_response = "Data analysis is disabled. Please select the 'Analyze CSV Data with AI' checkbox to enable analysis."
+                st.session_state.chat_history.append(("assistant", bot_response))
+                st.chat_message("assistant").markdown(bot_response)
+            elif st.session_state.transaction_data is None:
+                bot_response = "Please upload a transaction CSV file first, then ask me to analyze it."
                 st.session_state.chat_history.append(("assistant", bot_response))
                 st.chat_message("assistant").markdown(bot_response)
             else:
